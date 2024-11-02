@@ -1,14 +1,17 @@
+import unittest
+
 # from numpy import array, pi, einsum
+# We use the NumPy testing suite to make it easier to compare arrays
+from numpy.testing import (assert_equal, assert_allclose, assert_array_equal, 
+    assert_raises, TestCase)
+from numpy import array
+from sympy import pi, Rational, Symbol, sqrt as sp_sqrt
+# from sympy import symbols, MatrixSymbol
+
 from pymtensor.symmetry import (deg2rad, rotx, rotz, roty, rotu,
    SgSymOps)
 from pymtensor.sym_tensor import SymbolicTensor, SparseSymbolicTensor
 from pymtensor.rot_tensor import to_voigt
-# We use the NumPy testing suite to make it easier to compare arrays
-from numpy.testing import (assert_equal, assert_allclose, assert_array_equal, 
-    assert_raises, run_module_suite, TestCase)
-from numpy import array
-from sympy import pi, Rational, Symbol, sqrt as sp_sqrt
-# from sympy import symbols, MatrixSymbol
 
 
 class TestRotations(TestCase):
@@ -357,5 +360,5 @@ class TestSparseSymbolicTensor(TestCase):
         
 
 if __name__ == "__main__":
-#     run_module_suite()
-    run_module_suite(argv=['', '--nocapture'])
+    #import sys;sys.argv = ['', 'Test.testName']
+    unittest.main()

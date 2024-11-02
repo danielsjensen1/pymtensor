@@ -1,8 +1,10 @@
+import unittest
+
 from numpy import array, pi, einsum
 from pymtensor.rot_tensor import (euler_rot, to_voigt, to_tensor, rot_tensor, 
                                 rotu, rotx, roty, rotz)
 from numpy import identity
-from numpy.testing import assert_allclose, assert_array_equal, run_module_suite, TestCase
+from numpy.testing import assert_allclose, assert_array_equal, TestCase
 from sympy import symbols, MatrixSymbol
 
 
@@ -95,5 +97,5 @@ class TestSymbolic(TestCase):
         
 
 if __name__ == "__main__":
-#     run_module_suite()
-    run_module_suite(argv=['', '--nocapture'])
+    #import sys;sys.argv = ['', 'Test.testName']
+    unittest.main()

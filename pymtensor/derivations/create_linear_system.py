@@ -43,7 +43,7 @@ def create_linear_system(symbol, superscript, sym_group='622', tdim=2):
         lines.append(line)
         Iint = int(I) - 1
         Jint = int(J) - 1
-        frac_line = '&'.join(["{} \cdot {}".format(symop[Iint, int(i)-1], symop[Jint, int(j)-1])
+        frac_line = '&'.join([r"{} \cdot {}".format(symop[Iint, int(i)-1], symop[Jint, int(j)-1])
                               for (i, j) in indices])
         frac_line = frac_line.replace('sqrt(3)', '\\sqrt{3}')
         frac_lines.append(frac_line)
@@ -57,6 +57,6 @@ def create_linear_system(symbol, superscript, sym_group='622', tdim=2):
 
 
 if __name__ == '__main__':
-    superscript = '6\parallel Z_3'
-    superscript = '2\parallel Z_1'
+    superscript = r'6\parallel Z_3'
+    superscript = r'2\parallel Z_1'
     create_linear_system('a', superscript)
