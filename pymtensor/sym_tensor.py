@@ -12,7 +12,6 @@ from sympy.polys.solvers import solve_lin_sys
 
 from pymtensor.rot_tensor import rot_tensor#, to_voigt
 from pymtensor.indexing_helpers import expand2full, sort_lists_convert2tuples
-from abc import abstractstaticmethod
 
 
 class SymbolicTensor(object):
