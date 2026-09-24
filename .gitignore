@@ -5,11 +5,15 @@
 *.npz
 *.dat
 *.prof
-*.pyc
-*.pyo
 *.so
 *.hdf5
-build
+build/
+
+# Python build artifacts
+*.egg-info/
+dist/
+__pycache__/
+*.py[cod]
 
 # Things specific to this project #
 ###################################

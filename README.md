@@ -7,21 +7,27 @@ Copyright 2021 National Technology & Engineering Solutions of Sandia, LLC (NTESS
 
 
 # Installation
-To get started right away the pymtensor code can be added to your python path:
+
+Install from the repository root using pip:
 
 ```bash
-export PYTHONPATH=$PYTHONPATH:/path/to/pymtensor
+pip install .
 ```
 
-The package can also be installed via the setuptools setup.py script:
+To include the optional `gmpy2` dependency (recommended for speed improvements to SymPy's polynomial solver):
 
 ```bash
-python setup.py
+pip install ".[speed]"
 ```
 
-PyMTensor requires Python 3.5 or higher, NumPy version 1.6 or greater, and SymPy version 1.7 or greater.
+For development, install in editable mode:
+
+```bash
+pip install -e .
+```
+
+PyMTensor requires Python 3.6 or higher, NumPy 1.6 or greater, SymPy 1.7 or greater, and psutil.
 The optional dependency gmpy2 for SymPy is highly recommended for speed improvements.
-TODO: add Windows installation instructions
 
 # Quick Start
 The following code snippet will compute the unique tensor elements of a 5th-rank tensor with indices 1 and 3 interchangeable.
