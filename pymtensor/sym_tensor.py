@@ -1,5 +1,5 @@
 from collections import defaultdict
-from itertools import combinations_with_replacement, permutations, product
+from itertools import permutations, product
 import logging
 import time
 import psutil
@@ -11,6 +11,7 @@ from sympy.polys.rings import ring
 from sympy.polys.solvers import solve_lin_sys
 
 from pymtensor.rot_tensor import rot_tensor#, to_voigt
+from abc import abstractstaticmethod
 
 
 class SymbolicTensor(object):
@@ -37,8 +38,8 @@ class SymbolicTensor(object):
         vm = {}
         for dim in set(dims):
             ivm[dim], vm[dim] = SymbolicTensor.voigt_map(dim, start)
-        print('vm=', vm)
-        print('ivm=', ivm)
+#         print('vm=', vm)
+#         print('ivm=', ivm)
         self.dims = dims
         self.vm = vm
         self.ivm = ivm
@@ -89,6 +90,15 @@ class SymbolicTensor(object):
     
     @staticmethod
     def _parse_name(name):
+        """
+        Parse a tensor definition string.
+        
+        Look for all of the dimensions and repeat structures in a given tensor
+        definition string.  Two formats are currently supported: 'ABcAe' is 
+        equivalent to 'a2,b2,c1,a2,e1' and both forms indicated a tensor of
+        dimension (3*3)*(3*3)*(3)*(3*3)*(3) = 3^8 = 6561.  The capital letters
+        indicate that the tensor has symmetry that reduces the number of
+        """
         if ',' in name:
             indices = name.split(',')
             # Check if the last token is empty
@@ -269,38 +279,6 @@ class SymbolicTensor(object):
         return newtensor
                 
 
-class SparseSymbolicTensor(SymbolicTensor):
-    def __init__(self, indices, symbol, start=1, voigt=True, reverse=True,
-                 create_tensor=True):
-        """
-        PyMTensor applies crystal symmetries to dielectric, elastic, 
-        piezoelectric and other material tensors of interest.  It determines 
-        what components are zero and the relationships between the nonzero 
-        components for all crystallographic point groups.  It is capable of 
-        computing components of higher-order material tensors needed when 
-        treating nonlinear effects.
-        
-        start: integer
-            Allow for either 0- or 1-based indexing (`start=0` or `start=1`).
-        """
-        dims, repeats = SymbolicTensor._parse_name(indices)
-        # Total uncompressed tensor dimension
-        tdim = sum(dims)
-        print(dims, repeats, tdim)
-        # Initialize all necessary Voigt and inverse-Voigt mappings based on the
-        # unique dimensions
-        ivm = {}
-        vm = {}
-        self._index_mappings(6, 2)
-
-    @staticmethod
-    def _index_mappings(vm, repeat):
-        for indices in combinations_with_replacement(range(vm), repeat):
-            print(indices, set(permutations(indices)))
-#         for i in range(1, 4):
-#             for j in range(i, 4):
-#                 for k in range(j, 4):
-#                     print((i,j,k), set(permutations((i,j,k))))
 
 def symbolic_piezo(dim, sym, canonical=True, sort=True):
     voigt_map = {(0, 0): 0, (1, 1): 1, (2, 2): 2,
