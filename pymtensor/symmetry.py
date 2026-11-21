@@ -4,28 +4,85 @@ from sympy import acos, cos, pi, sin, sqrt, Rational
 
 
 def round_if_safe(val, atol):
+    """
+    Round *val* to the nearest integer if it is within *atol* of one.
+
+    Parameters
+    ----------
+    val : float
+        Value to (possibly) round.
+    atol : float
+        Absolute tolerance for considering *val* an integer.
+
+    Returns
+    -------
+    int or float
+        Nearest integer if ``|round(val) - val| < atol``, otherwise *val*
+        unchanged.
+    """
     ival = rint(val)
     if abs(ival - val) < atol:
         return int(ival)
     else:
-        return val 
+        return val
 
 
 def rotx(theta):
+    """
+    Rotation matrix for a rotation by *theta* about the x-axis.
+
+    Parameters
+    ----------
+    theta : float or sympy expression
+        Rotation angle in radians.
+
+    Returns
+    -------
+    R : numpy.ndarray, shape (3, 3)
+        Rotation matrix.
+    """
     c = cos(theta)
     s = sin(theta)
     return array([[1, 0,  0],
                   [0, c, -s],
                   [0, s,  c]])
 
+
 def roty(theta):
+    """
+    Rotation matrix for a rotation by *theta* about the y-axis.
+
+    Parameters
+    ----------
+    theta : float or sympy expression
+        Rotation angle in radians.
+
+    Returns
+    -------
+    R : numpy.ndarray, shape (3, 3)
+        Rotation matrix.
+    """
     c = cos(theta)
     s = sin(theta)
     return array([[ c, 0,  s],
                   [ 0, 1,  0],
                   [-s, 0,  c]])
 
+
 def rotz(theta):
+    """
+    Rotation matrix for a rotation by *theta* about the z-axis.
+
+    Parameters
+    ----------
+    theta : float or sympy expression
+        Rotation angle in radians.
+
+    Returns
+    -------
+    R : numpy.ndarray, shape (3, 3)
+        Rotation matrix.
+    """
     c = cos(theta)
     s = sin(theta)
     return array([[c, -s, 0],
@@ -34,16 +91,53 @@ def rotz(theta):
 
 
 def deg2rad(deg):
-    """Convert from degrees to radians."""
+    """
+    Convert an angle from degrees to radians.
+
+    Parameters
+    ----------
+    deg : float or sympy expression
+        Angle in degrees.
+
+    Returns
+    -------
+    float or sympy expression
+        Angle in radians.
+    """
     return deg * pi / 180
 
 
 def norm(v):
+    """
+    Compute the Euclidean norm of a vector using SymPy arithmetic.
+
+    Parameters
+    ----------
+    v : array-like
+        Vector whose norm is computed.  Elements may be SymPy expressions.
+
+    Returns
+    -------
+    sympy expression or float
+        Euclidean norm ``sqrt(v · v)``.
+    """
     return sqrt(v.dot(v))
 
 
 def angle(v1, v2):
-    """Compute the angle between two vectors using the dot product."""
+    """
+    Compute the angle between two vectors using the dot product.
+
+    Parameters
+    ----------
+    v1, v2 : array-like
+        Input vectors.  Elements may be SymPy expressions.
+
+    Returns
+    -------
+    theta : sympy expression or float
+        Angle between *v1* and *v2* in radians.
+    """
     lhs = v1.dot(v2)
     v1mag = norm(v1)
     v2mag = norm(v2)
@@ -52,12 +146,46 @@ def angle(v1, v2):
 
 
 def reflectu(u):
-    # See https://en.wikipedia.org/wiki/Transformation_matrix#Reflection_2
+    """
+    Reflection matrix through the plane whose normal is *u*.
+
+    Uses the Householder formula
+    ``M = I - 2 * u u^T / (u^T u)``.
+    See https://en.wikipedia.org/wiki/Transformation_matrix#Reflection_2
+
+    Parameters
+    ----------
+    u : array-like of length 3
+        Normal vector of the reflection plane (need not be normalised).
+
+    Returns
+    -------
+    M : numpy.ndarray, shape (3, 3)
+        Reflection matrix.
+    """
     u = u / norm(u)
     return eye(3, dtype=int) - 2 * u.reshape((3, 1)).dot(u.reshape((1, 3)))
 
 
 def rotu(theta, u):
+    """
+    Rotation matrix for a rotation by *theta* about an arbitrary axis *u*.
+
+    Uses the Rodrigues rotation formula.  The axis vector is normalised
+    internally.
+
+    Parameters
+    ----------
+    theta : float or sympy expression
+        Rotation angle in radians.
+    u : array-like of length 3
+        Rotation axis vector (need not be normalised).
+
+    Returns
+    -------
+    R : numpy.ndarray, shape (3, 3)
+        Rotation matrix.
+    """
     # Normalize u
     ux, uy, uz = u / norm(u)
     c = cos(theta)
@@ -69,6 +197,42 @@ def rotu(theta, u):
 
 
 class SgSymOps(object):
+    """
+    Full symmetry operation matrices for all 32 crystallographic point groups.
+
+    Builds and stores the complete set of symmetry operation matrices (not
+    just generators) for every crystallographic point group, organised by
+    crystal system.  Two axis conventions are available:
+
+    * **Default** – the z-axis is the principal rotation axis for all
+      groups; the monoclinic unique axis is z.
+    * **IEEE** – follows the IEEE standard for piezoelectric tensors, where
+      the monoclinic unique axis is y and a single canonical choice of
+      orientation is made for groups with multiple equivalent orientations
+      (e.g. ``32``, ``3m``, ``4d2m``).
+
+    Attributes
+    ----------
+    groups : dict of dict
+        Nested dictionary ``{crystal_system: {group_name: tuple_of_arrays}}``.
+    flat : dict
+        Flat dictionary ``{group_name: tuple_of_arrays}`` (default convention).
+    groups_ieee : dict of dict
+        Same as *groups* but using the IEEE axis convention.
+    flat_ieee : dict
+        Flat dictionary using the IEEE axis convention.
+    hexops : dict
+        Individual named hexagonal symmetry operation matrices.
+    ops : dict
+        Individual named non-hexagonal symmetry operation matrices.
+
+    Examples
+    --------
+    >>> sg = SgSymOps()
+    >>> symops = sg('3m')        # IEEE convention
+    >>> symops = sg('3m', ieee=False)  # default convention
+    """
+
     def __init__(self):
         self.groups = {}
         self._E = eye(3, dtype=int)  # Identity
@@ -83,30 +247,68 @@ class SgSymOps(object):
         self.groups = groups
         self.flat = self.flatten_dict(groups)
         self._init_ieee()
-    
+
     def __call__(self, cname, ieee=True):
         """
+        Return the tuple of symmetry operation matrices for a point group.
+
         Parameters
         ----------
-        cname: string
-            Class name
-        ieee: boolean
-            Use IEEE standard
+        cname : str
+            Hermann-Mauguin point-group symbol, e.g. ``'3m'``, ``'622'``,
+            ``'m3dm'``.
+        ieee : bool, optional
+            If ``True`` (default), use the IEEE axis convention.
+            If ``False``, use the default (z-principal) convention.
+
+        Returns
+        -------
+        symops : tuple of numpy.ndarray
+            Tuple of ``(3, 3)`` rotation/reflection matrices that generate
+            the point group.
         """
         if ieee:
             return self.flat_ieee[cname]
         else:
             return self.flat[cname]
-    
+
     @staticmethod
     def flatten_dict(d):
+        """
+        Flatten a two-level nested dict into a single-level dict.
+
+        Parameters
+        ----------
+        d : dict of dict
+            Nested dictionary ``{outer_key: {inner_key: value}}``.
+
+        Returns
+        -------
+        flat : dict
+            Dictionary ``{inner_key: value}`` containing all entries from
+            every inner dictionary.
+        """
         flat = {}
         for group in d.values():
             for key, val in group.items():
                 flat[key] = val
         return flat
-    
+
     def _init_ieee(self):
+        """
+        Build the IEEE-convention versions of the point-group dictionaries.
+
+        The IEEE standard for piezoelectric tensors differs from the default
+        convention in two ways:
+
+        1. **Monoclinic groups** – the unique (2-fold) axis is y instead of z.
+        2. **Ambiguous orientations** – groups that have two canonical
+           orientations (``32``, ``3m``, ``3dm``, ``4d2m``, ``6dm2``) are
+           resolved to a single representative orientation matching the IEEE
+           convention, and the other variant is removed.
+
+        The results are stored in ``self.groups_ieee`` and ``self.flat_ieee``.
+        """
         ops = self.ops
         E = ops["E"]; C2y = ops["C2y"]; SIGy = ops["SIGy"]; I = ops["I"]
         groups = self.groups.copy()
@@ -122,15 +324,6 @@ class SgSymOps(object):
         hexagonal = groups["hexagonal"]
         hexagonal.pop("32(1)")
         hexagonal["32"] = hexagonal.pop("32(2)")
-#         from sympy import Rational
-#         half = Rational(1, 2)
-#         hexagonal["32"] = (array([[-half, sqrt(3) * half, 0],
-#                                   [-sqrt(3) * half, -half, 0],
-#                                   [0, 0, 1]]),
-#                            array([[1, 0, 0],
-#                                   [0, -1, 0],
-#                                   [0, 0, -1]]),
-#         )
         hexagonal.pop("3m(1)")
         hexagonal["3m"] = hexagonal.pop("3m(2)")
         hexagonal.pop("3dm(1)")
@@ -141,6 +334,20 @@ class SgSymOps(object):
         self.flat_ieee = self.flatten_dict(groups)
 
     def init_nonhexagonal(self):
+        """
+        Build symmetry operation matrices for all non-hexagonal point groups.
+
+        Covers the triclinic, monoclinic, orthorhombic, tetragonal, and cubic
+        crystal systems.  The default monoclinic unique axis is z.
+
+        Returns
+        -------
+        ops : dict
+            Named symmetry operation matrices (identity, rotations, reflections,
+            improper rotations).
+        groups : dict of dict
+            ``{crystal_system: {group_name: tuple_of_arrays}}``.
+        """
         # a1 != a2 != a3 and alpha != beta != gamma != 90 (triclinic)
         E = self._E  # Identity
         I = self._I  # inversion
@@ -185,7 +392,7 @@ class SgSymOps(object):
                "4mm": (E, C4zp, C4zm, C2z, SIGx, SIGy, SIGda, SIGdb),
                "4d2m(1)": (E, S4zp, S4zm, C2x, C2y, C2z, SIGda, SIGdb),
                "4d2m(2)": (E, S4zp, S4zm, C2z, C2a, C2b, SIGx, SIGy),
-               "4/mmm": (E, C4zp, C4zm, C2x, C2y, C2z, C2a, C2b, I, 
+               "4/mmm": (E, C4zp, C4zm, C2x, C2y, C2z, C2a, C2b, I,
                          S4zp, S4zm, SIGx, SIGy, SIGz, SIGda, SIGdb),
               }
         # a1 = a2 = a3 and alpha = beta = gamma = 90 (cubic)
@@ -224,53 +431,65 @@ class SgSymOps(object):
         S4xm = SIGx.dot(rotx(deg2rad(270)))
         S4yp = SIGy.dot(roty(deg2rad(90)))
         S4ym = SIGy.dot(roty(deg2rad(270)))
-        cubic = {"23": (E, C31p, C31m, C32p, C32m, C33p, C33m, C34p, C34m, 
+        cubic = {"23": (E, C31p, C31m, C32p, C32m, C33p, C33m, C34p, C34m,
                         C2x, C2y, C2z),
                  "m3d": (E, C31p, C31m, C32p, C32m, C33p, C33m, C34p, C34m,
-                         C2x, C2y, C2z, I, S61p, S61m, S62p, S62m, S63p, S63m, 
+                         C2x, C2y, C2z, I, S61p, S61m, S62p, S62m, S63p, S63m,
                          S64p, S64m, SIGx, SIGy, SIGz),
                  "432": (E, C31p, C31m, C32p, C32m, C33p, C33m, C34p, C34m,
                          C2x, C2y, C2z, C2a, C2b, C2c, C2d, C2e, C2f,
                          C4xp, C4xm, C4yp, C4ym, C4zp, C4zm),
                  "4d3m": (E, C31p, C31m, C32p, C32m, C33p, C33m, C34p, C34m,
-                          C2x, C2y, C2z, SIGda, SIGdb, SIGdc, SIGdd, SIGde, 
+                          C2x, C2y, C2z, SIGda, SIGdb, SIGdc, SIGdd, SIGde,
                           SIGdf, S4xp, S4xm, S4yp, S4ym, S4zp, S4zm),
                  "m3dm": (E, C31p, C31m, C32p, C32m, C33p, C33m, C34p, C34m,
                           C2x, C2y, C2z, C4xp, C4xm, C4yp, C4ym, C4zp, C4zm,
-                          C2a, C2b, C2c, C2d, C2e, C2f, I, 
-                          S61p, S61m, S62p, S62m, S63p, S63m, S64p, S64m, 
-                          SIGx, SIGy, SIGz, SIGda, SIGdb, SIGdc, SIGdd, SIGde, 
+                          C2a, C2b, C2c, C2d, C2e, C2f, I,
+                          S61p, S61m, S62p, S62m, S63p, S63m, S64p, S64m,
+                          SIGx, SIGy, SIGz, SIGda, SIGdb, SIGdc, SIGdd, SIGde,
                           SIGdf, S4xp, S4xm, S4yp, S4ym, S4zp, S4zm),
                 }
         ops = {"E": E, "I": I, "C2z": C2z, "SIGz": SIGz, "C2x": C2x,
                "C2y": C2y, "SIGx": SIGx, "SIGy": SIGy, "C2a": C2a, "C2b": C2b,
                "C4z+": C4zp, "C4z-": C4zm, "SIGda": SIGda, "SIGdb": SIGdb,
                "S4z+": S4zp, "S4z-": S4zm, "C2c": C2c, "C2d": C2d, "C2e": C2e,
-               "C2f": C2f, "C31+": C31p, "C31-": C31m, "C32+": C32p, 
-               "C32-": C32m, "C33+": C33p, "C33-": C33m, "C34+": C34p, 
-               "C34-": C34m, "C4x+": C4xp, "C4x-": C4xm, "C4y+": C4yp, 
-               "C4y-": C4ym, "C4z+": C4zp, "C4z-": C4zm, "SIGdc": SIGdc, 
+               "C2f": C2f, "C31+": C31p, "C31-": C31m, "C32+": C32p,
+               "C32-": C32m, "C33+": C33p, "C33-": C33m, "C34+": C34p,
+               "C34-": C34m, "C4x+": C4xp, "C4x-": C4xm, "C4y+": C4yp,
+               "C4y-": C4ym, "C4z+": C4zp, "C4z-": C4zm, "SIGdc": SIGdc,
                "SIGdd": SIGdd, "SIGde": SIGde, "SIGdf": SIGdf, "S61+": S61p,
-               "S61-": S61m, "S62+": S62p, "S62-": S62m, "S63+": S63p, 
+               "S61-": S61m, "S62+": S62p, "S62-": S62m, "S63+": S63p,
                "S63-": S63m, "S64+": S64p, "S64-": S64m, "S4x+": S4xp,
                "S4x-": S4xm, "S4y+": S4yp, "S4y-": S4ym
                }
         groups = {"triclinic": tri, "monoclinic": mono, "orthorhombic": ortho,
                   "tetragonal": tet, "cubic": cubic}
         return ops, groups
-    
+
     def init_hexagonal(self):
         """
-        All hexagonal classes.
-        """
-        """
-        Dictionary of all symmetry operations for hexagonal lattices.
-        
-        Without loss of generality we set the following basis vectors 
-        satisfying the conditions a1 = a2, alpha = beta = 90, and gamma = 120
-        a1 = <1,0,0>
-        a2 = <1/2,sqrt(3)/2,0>
-        a3 = <0,0,1>
+        Build symmetry operation matrices for all hexagonal point groups.
+
+        Covers the trigonal (3, 3d, 32, 3m, 3dm) and hexagonal
+        (6, 6d, 6/m, 622, 6mm, 6dm2, 6/mmm) crystal classes.
+
+        Without loss of generality the following basis is used:
+
+        * **a1** = [1, 0, 0]
+        * **a2** = [cos(120°), sin(120°), 0]  (so that a1 = a2 and γ = 120°)
+        * **a3** = [0, 0, 1]
+
+        Groups with two inequivalent orientations (e.g. ``32``, ``3m``,
+        ``6dm2``) are labelled ``'<group>(1)'`` and ``'<group>(2)'``.
+        The IEEE-convention versions resolve these to a single representative;
+        see :meth:`_init_ieee`.
+
+        Returns
+        -------
+        ops : dict
+            Named hexagonal symmetry operation matrices.
+        group : dict
+            ``{group_name: tuple_of_arrays}`` for all hexagonal point groups.
         """
         SIGz = self._SIGz
         a1 = array([1, 0, 0])
@@ -305,7 +524,7 @@ class SgSymOps(object):
         SIGv2 = reflectu(a2)
         SIGv3 = reflectu(a1 + a2)
         ops = {"E": E, "C2": C2, "C3+": C3p, "C3-": C3m, "C6+": C6p, "C6-": C6m,
-               "C21'": C21_p, "C22'": C22_p, "C23'": C23_p, 
+               "C21'": C21_p, "C22'": C22_p, "C23'": C23_p,
                "C21''": C21_pp, "C22''": C22_pp, "C23''": C23_pp, "I": I,
                "SIGh": SIGh, "S3+": S3p, "S3-": S3m, "S6+": S6p, "S6-": S6m,
                "SIGd1": SIGd1, "SIGd2": SIGd2, "SIGd3": SIGd3, "SIGv1": SIGv1,
@@ -318,7 +537,7 @@ class SgSymOps(object):
                  "3m(2)": (E, C3p, C3m, SIGv1, SIGv2, SIGv3),
                  "3dm(1)": (E, C3p, C3m, C21_p, C22_p, C23_p, I, S6p, S6m,
                             SIGd1, SIGd2, SIGd3),
-                 "3dm(2)": (E, C3p, C3m, C21_pp, C22_pp, C23_pp, I, S6p, S6m, 
+                 "3dm(2)": (E, C3p, C3m, C21_pp, C22_pp, C23_pp, I, S6p, S6m,
                             SIGv1, SIGv2, SIGv3),
                  "6": (E, C6p, C6m, C3p, C3m, C2),
                  "6d": (E, S3p, S3m, C3p, C3m, SIGh),
@@ -334,13 +553,42 @@ class SgSymOps(object):
                              SIGd1, SIGd2, SIGd3),
                  "6/mmm": (E, C6p, C6m, C3p, C3m, C2, C21_p, C22_p, C23_p,
                            C21_pp, C22_pp, C23_pp, I, S3p, S3m, S6p, S6m,
-                           SIGh, SIGd1, SIGd2, SIGd3, SIGv1, SIGv2, SIGv3), 
+                           SIGh, SIGd1, SIGd2, SIGd3, SIGv1, SIGv2, SIGv3),
                  }
         return ops, group
-    
-    
+
+
 class RedSgSymOps(object):
-    
+    """
+    Crystallographic point group symmetry in generator (reduced) form.
+
+    Stores one or two generator matrices per point group rather than the full
+    orbit.  This is more compact than :class:`SgSymOps` and is the
+    recommended input to :meth:`~pymtensor.sym_tensor.SymbolicTensor.apply_symmetry`,
+    which internally expands the generators via the tensor invariance condition.
+
+    The individual primitive symmetry operation matrices (identity, 2-fold
+    rotations, mirror planes, 3/4/6-fold rotations, etc.) are accessible
+    via ``self.symops``.
+
+    Attributes
+    ----------
+    symops : dict
+        Named primitive symmetry operation matrices, keyed by descriptive
+        strings such as ``'2parZ3'`` (2-fold rotation parallel to Z3),
+        ``'mperZ1'`` (mirror perpendicular to Z1), ``'4parZ3'``, etc.
+    group : dict
+        ``{group_name: tuple_of_generator_arrays}`` for all 32
+        crystallographic point groups.
+
+    Examples
+    --------
+    >>> sg = RedSgSymOps()
+    >>> symops = sg('3m')   # returns 2 generator matrices
+    >>> len(symops)
+    2
+    """
+
     def __init__(self):
         symops = {}
         # Generator matrices
@@ -423,12 +671,20 @@ class RedSgSymOps(object):
         group["4d3m"] = symtuple(['4dparZ3', '3par[111]'])
         group["m3dm"] = symtuple(['4parZ3', '3dpar[111]', 'mper[11d0]'])
         self.group = group
-    
+
     def __call__(self, cname):
         """
+        Return the tuple of generator matrices for a point group.
+
         Parameters
         ----------
-        cname: string
-            Class name
+        cname : str
+            Hermann-Mauguin point-group symbol, e.g. ``'3m'``, ``'622'``,
+            ``'m3dm'``.
+
+        Returns
+        -------
+        symops : tuple of numpy.ndarray
+            Tuple of ``(3, 3)`` generator matrices for the point group.
         """
         return self.group[cname]

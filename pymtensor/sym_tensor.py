@@ -15,20 +15,77 @@ from pymtensor.indexing_helpers import expand2full, sort_lists_convert2tuples
 
 
 class SymbolicTensor(object):
-    
+    """
+    A symbolic material tensor whose components are SymPy polynomial symbols.
+
+    Constructs a dense tensor of symbolic variables labelled by their
+    (possibly Voigt-compressed) indices, then applies crystallographic
+    symmetry constraints to determine which components are zero and which
+    are related to each other.
+
+    The index string *indices* encodes the rank and symmetry structure of
+    the tensor.  See :doc:`../notation` for a full description of the syntax.
+    In brief:
+
+    * Each character represents one index group.
+    * **Uppercase** letters denote rank-2 (Voigt-compressed) groups;
+      **lowercase** letters denote rank-1 groups.
+    * An optional integer suffix gives the explicit dimension (e.g. ``'a2'``
+      means a rank-2 group labelled ``a``).
+    * **Repeated** letters indicate major symmetry — those index groups are
+      interchangeable (e.g. ``'AA'`` for a 4th-order fully symmetric tensor).
+    * The compact form ``'AbABb'`` is equivalent to the comma-separated form
+      ``'a2,b1,a2,B2,b1'``.
+
+    Parameters
+    ----------
+    indices : str
+        Index string encoding the tensor rank and symmetry, e.g.
+        ``'AA'`` (4th-order elastic), ``'aB'`` (piezoelectric),
+        ``'AAA'`` (3rd-order elastic).
+    symbol : str
+        Base symbol name.  Each independent component will be named
+        ``symbol + index_string``, e.g. ``'c11'``, ``'c12'``, …
+    start : int, optional
+        Starting value for index labels: ``1`` for 1-based (default),
+        ``0`` for 0-based.
+    voigt : bool, optional
+        If ``True`` (default), label tensor components using compressed
+        Voigt indices.  If ``False``, use full (uncompressed) indices.
+    reverse : bool, optional
+        If ``True`` (default), sort the symbol list in reverse order so
+        that the highest-numbered component appears first in the polynomial
+        ring.
+    create_tensor : bool, optional
+        If ``False``, skip building the dense tensor array and polynomial
+        ring.  Useful for testing initialisation methods only.
+
+    Attributes
+    ----------
+    dims : list of int
+        Dimension of each index group.
+    vm : dict
+        Voigt maps keyed by dimension.
+    ivm : dict
+        Inverse Voigt maps keyed by dimension.
+    slices : list of slice
+        Index slices into the flat index vector for each group.
+    repeats : list of list of int
+        Groups of repeated (major-symmetric) index positions.
+    tensor : numpy.ndarray of sympy expressions
+        Dense symbolic tensor (only present when ``create_tensor=True``).
+    names : list of str
+        Sorted list of unique component names.
+    R : sympy polynomial ring
+        The polynomial ring over which the tensor components live.
+    ring_vals : tuple
+        Ring elements corresponding to each name in *names*.
+    tdim : int
+        Total tensor rank (sum of all group dimensions).
+    """
+
     def __init__(self, indices, symbol, start=1, voigt=True, reverse=True,
                  create_tensor=True):
-        """
-        PyMTensor applies crystal symmetries to dielectric, elastic, 
-        piezoelectric and other material tensors of interest.  It determines 
-        what components are zero and the relationships between the nonzero 
-        components for all crystallographic point groups.  It is capable of 
-        computing components of higher-order material tensors needed when 
-        treating nonlinear effects.
-        
-        start: integer
-            Allow for either 0- or 1-based indexing (`start=0` or `start=1`).
-        """
         dims, repeats = SymbolicTensor._parse_name(indices)
         # Total uncompressed tensor dimension
         tdim = sum(dims)
@@ -77,9 +134,23 @@ class SymbolicTensor(object):
             self.ring_vals = ring_vals
             self.tensor = tensor
         self.tdim = tdim
-    
+
     @staticmethod
     def _create_slices(dims):
+        """
+        Build index slices for partitioning the flat index vector by group.
+
+        Parameters
+        ----------
+        dims : list of int
+            Dimension of each index group.
+
+        Returns
+        -------
+        slices : list of slice
+            One slice per group; ``slices[i]`` selects the indices belonging
+            to group *i* from a flat index tuple.
+        """
         start_slice = 0
         slices = []
         for dim in dims:
@@ -87,9 +158,32 @@ class SymbolicTensor(object):
             slices.append(slice(start_slice, end_slice))
             start_slice = end_slice
         return slices
-    
+
     @staticmethod
     def _parse_name(name):
+        """
+        Parse an index string into dimension and repeat lists.
+
+        Accepts two formats:
+
+        * **Compact**: a string of letters, e.g. ``'AbABb'``.  Uppercase
+          letters map to rank-2 groups; lowercase to rank-1 groups.
+        * **Comma-separated**: explicit ``letter + integer`` tokens,
+          e.g. ``'a2,b1,a2,B2,b1'``.
+
+        Parameters
+        ----------
+        name : str
+            Index string in compact or comma-separated format.
+
+        Returns
+        -------
+        dims : list of int
+            Dimension (rank) of each index group.
+        repeats : list of list of int
+            Each sub-list contains the positions of a repeated (major-symmetric)
+            index group.  Groups that appear only once are omitted.
+        """
         if ',' in name:
             indices = name.split(',')
             # Check if the last token is empty
@@ -102,21 +196,48 @@ class SymbolicTensor(object):
                     indices.append(val + '2')
                 else:
                     indices.append(val + '1')
-        # TODO: generalize this to allow repeat characters before the 
+        # TODO: generalize this to allow repeat characters before the
         # integer and do some error checking
         dims = [int(val[1:]) for val in indices]
         repeats = SymbolicTensor._repeated_indices(indices)
         return dims, repeats
-    
+
     @staticmethod
     def voigt_map(dim, start=0):
+        """
+        Build Voigt and inverse-Voigt index mappings for a given group dimension.
+
+        The Voigt mapping compresses a symmetric index group of rank *dim*
+        into a single integer.  For example, for ``dim=2`` the six unique
+        symmetric pairs ``(1,1),(2,2),(3,3),(2,3),(1,3),(1,2)`` map to
+        Voigt indices ``0,1,2,3,4,5`` (0-based).
+
+        Currently supports dimensions 1, 2, 3, and 4.
+
+        Parameters
+        ----------
+        dim : int
+            Dimension (rank) of the symmetric index group.  Must be 1–4.
+        start : int, optional
+            Index offset: ``0`` for 0-based indexing (default),
+            ``1`` for 1-based.
+
+        Returns
+        -------
+        ivm : dict
+            Inverse Voigt map: compressed index (int) → full index tuple.
+        vm : dict
+            Voigt map: full index tuple → compressed index (int).  All
+            permutations of a given full index map to the same compressed
+            value.
+        """
         v = {}
         v[1] = [(1,), (2,), (3,)]
         v[2] = [(1, 1), (2, 2), (3, 3), (2, 3), (1, 3), (1, 2)]
         v[3] = [(1, 1, 1), (2, 2, 2), (3, 3, 3), (2, 2, 3), (1, 1, 3),
                 (1, 1, 2), (2, 3, 3), (1, 3, 3), (1, 2, 2), (1, 2, 3)]
-        v[4] = [(1, 1, 1, 1), (2, 2, 2, 2), (3, 3, 3, 3), (2, 2, 2, 3), 
-                (1, 1, 1, 3), (1, 1, 1, 2), (2, 2, 3, 3), (1, 1, 3, 3), 
+        v[4] = [(1, 1, 1, 1), (2, 2, 2, 2), (3, 3, 3, 3), (2, 2, 2, 3),
+                (1, 1, 1, 3), (1, 1, 1, 2), (2, 2, 3, 3), (1, 1, 3, 3),
                 (1, 1, 2, 2), (2, 3, 3, 3), (1, 3, 3, 3), (1, 2, 2, 2),
                 (1, 1, 2, 3), (2, 2, 1, 3), (3, 3, 1, 2)]
         vm = {}
@@ -136,29 +257,38 @@ class SymbolicTensor(object):
             for index in permutations(shifted_index):
                 vm[index] = ishifted
         return ivm, vm
-    
+
     def voigt_map_ascending(self, dim, start=0):
         v = {}
-        
-    
+
     def _newindex(self, index, start=1, voigt=True):
         """
-        Create a new index possibly in Voigt notation with all symmetries and
-        sortings possible.
-        
+        Compute the canonical (possibly Voigt-compressed) index for a component.
+
+        Given a raw tensor index tuple, applies the Voigt compression and
+        major-symmetry sorting to produce the canonical label used to name
+        that component.
+
         Parameters
         ----------
-        index: tuple of integers
-            The full tensor index to be processed
-        repeats: list of lists of integers
-            The indices that need to be sorted assuming all symmetric indices 
-            are already reduced to Voigt notation
-        start: int
-            The starting integer used to choose 0- or 1- based indexing.
-        
+        index : tuple of int
+            Raw (0-based) tensor index, e.g. ``(0, 1, 2, 2)``.
+        start : int, optional
+            Starting value for index labels (``1`` for 1-based, ``0`` for
+            0-based).  Default is ``1``.
+        voigt : bool, optional
+            If ``True`` (default), return the compressed Voigt index.
+            If ``False``, return the full expanded index after sorting.
+
+        Returns
+        -------
+        newindex : list of int
+            Canonical index labels for this tensor component.
+
         Notes
         -----
-        This function is separated from the tensor creation to simplify testing.
+        The function is separated from the tensor creation loop to simplify
+        unit testing (see ``test_symmetry.py``).
         """
         ivm = self.ivm
         vm = self.vm
@@ -176,7 +306,7 @@ class SymbolicTensor(object):
         for dim, slice_ in zip(dims, slices):
             newindex.append(vm[dim][tuple(index[slice_])])
         sortkey = None
-        # We can use a custom sort key if using full-tensor notation 
+        # We can use a custom sort key if using full-tensor notation
         if not voigt:
             sortdict = {1:1, 2:4, 3:6, 4:5, 5:3, 6:2}
             sortkey = lambda i: sortdict[i]
@@ -192,17 +322,64 @@ class SymbolicTensor(object):
             for dim, val in zip(dims, index):
                 newindex.extend(ivm[dim][val])
         return newindex
-    
+
     @staticmethod
     def _repeated_indices(name):
+        """
+        Find groups of repeated (major-symmetric) index tokens.
+
+        Parameters
+        ----------
+        name : list of str
+            List of index tokens such as ``['a2', 'b1', 'a2']``.
+
+        Returns
+        -------
+        repeats : list of list of int
+            Each sub-list contains the positions of tokens that share the
+            same letter (case-sensitive).  Tokens appearing only once are
+            excluded.
+
+        Examples
+        --------
+        >>> SymbolicTensor._repeated_indices(['a2', 'b1', 'a2'])
+        [[0, 2]]
+        """
         # Look for all repeated uppercase letters
         repeats = defaultdict(list)
         for i, val in enumerate(name):
             repeats[val].append(i)
         repeats = [val for val in repeats.values() if len(val) > 1]
         return repeats
-    
+
     def apply_symmetry(self, symops, timings=True):
+        """
+        Apply a set of symmetry operations to the tensor and collect constraints.
+
+        For each symmetry operation *R*, forms the equation
+        ``rot_tensor(R, T) - T = 0`` and adds the non-trivial polynomial
+        equations to a constraint set.  Solves the resulting linear system
+        over the polynomial ring to find which tensor components are zero or
+        related.
+
+        Parameters
+        ----------
+        symops : iterable of numpy.ndarray
+            Symmetry operation matrices, each of shape ``(3, 3)``.  May be
+            generator matrices (see :class:`~pymtensor.symmetry.RedSgSymOps`)
+            or the full group orbit
+            (see :class:`~pymtensor.symmetry.SgSymOps`).
+        timings : bool, optional
+            If ``True`` (default), print timing information for each
+            symmetry operation and the linear solve.
+
+        Returns
+        -------
+        sol : dict
+            Maps dependent component symbols to their expressions in terms
+            of free (independent) components.  An empty dict means the tensor
+            is completely unconstrained by the given symmetry.
+        """
         tensor = self.tensor; R = self.R; ring_vals = self.ring_vals
         eqs = set()
         if timings: tic = time.perf_counter()
@@ -225,21 +402,42 @@ class SymbolicTensor(object):
             print(eq.as_expr())
         if timings: toc = time.perf_counter()
         if timings: print(f"Rotate tensor = {toc - tic:0.4f} seconds")
-        
+
         if timings: tic = time.perf_counter()
         process = psutil.Process()
-        print('bytes used = {}'.format(process.memory_info().rss))  # in bytes 
+        print('bytes used = {}'.format(process.memory_info().rss))  # in bytes
         sol = solve_lin_sys(eqs, R, _raw=False)
         process = psutil.Process()
-        print('bytes used = {}'.format(process.memory_info().rss))  # in bytes 
+        print('bytes used = {}'.format(process.memory_info().rss))  # in bytes
         if timings: toc = time.perf_counter()
         if timings: print(f"Solve linear system = {toc - tic:0.4f} seconds")
         numfreevars = len(ring_vals) - len(sol)
         print(f"Number of free variables = {numfreevars}")
         logging.info('Number of free variables = {}'.format(numfreevars))
         return sol
-    
+
     def sol_details(self, symops):
+        """
+        Apply symmetry and return the full solution dictionary.
+
+        Calls :meth:`apply_symmetry` and then expands the result so that
+        every component name (including those that are free variables) maps
+        to its value or canonical representative.
+
+        Parameters
+        ----------
+        symops : iterable of numpy.ndarray
+            Symmetry operation matrices (see :meth:`apply_symmetry`).
+
+        Returns
+        -------
+        fullsol : dict
+            Maps every component name string to its SymPy symbol expression.
+            Free (independent) components map to themselves; constrained
+            components map to the free component they equal (or zero).
+        R : sympy polynomial ring
+            The polynomial ring used internally.
+        """
         R = self.R; names = self.names
         sol = self.apply_symmetry(symops)
         tic = time.perf_counter()
@@ -250,8 +448,26 @@ class SymbolicTensor(object):
         toc = time.perf_counter()
         print(f"To full solution = {toc - tic:0.4f} seconds")
         return fullsol, R
-    
+
     def unique_tensor(self, symops):
+        """
+        Apply symmetry and return the tensor with equivalent components substituted.
+
+        Calls :meth:`apply_symmetry` and fills every element of the symbolic
+        tensor with the canonical representative component (or zero) after
+        the symmetry constraints have been applied.
+
+        Parameters
+        ----------
+        symops : iterable of numpy.ndarray
+            Symmetry operation matrices (see :meth:`apply_symmetry`).
+
+        Returns
+        -------
+        newtensor : numpy.ndarray of sympy expressions
+            Tensor of the same shape as :attr:`tensor` with all equivalent
+            components replaced by their canonical representative.
+        """
         tensor = self.tensor
         sol = self.apply_symmetry(symops)
         tic = time.perf_counter()
@@ -268,22 +484,49 @@ class SymbolicTensor(object):
         toc = time.perf_counter()
         print(f"Format solution = {toc - tic:0.4f} seconds")
         return newtensor
-                
+
 
 class SparseSymbolicTensor(SymbolicTensor):
+    """
+    Sparse symbolic tensor exploiting both minor and major symmetries.
+
+    .. note::
+        This class is a **work in progress**.  The index-mapping machinery
+        (:meth:`_reduced_indices`, :meth:`_major_syms`, etc.) is implemented
+        and tested, but the downstream steps that build the sparse polynomial
+        system and solve it have not yet been completed.  Do not use this
+        class for production computations; use :class:`SymbolicTensor` instead.
+
+    Unlike :class:`SymbolicTensor`, which allocates a dense ``3^N`` symbolic
+    array, :class:`SparseSymbolicTensor` is designed to work only with the
+    algebraically independent components by exploiting:
+
+    * **Minor symmetries** – Voigt compression of each symmetric index group.
+    * **Major symmetries** – permutation equivalence between entire index groups
+      (e.g. ``c_{ijkl} = c_{klij}``).
+
+    For a 4th-order elastic tensor this reduces from 81 to 21 independent
+    components before any crystal symmetry is applied, giving significant
+    memory and time savings for high-rank tensors.
+
+    Parameters
+    ----------
+    indices : str
+        Index string (same syntax as :class:`SymbolicTensor`).
+    symbol : str
+        Base symbol name.
+    start : int, optional
+        Starting index value.  Default is ``1``.
+    voigt : bool, optional
+        Reserved for future use.
+    reverse : bool, optional
+        Reserved for future use.
+    create_tensor : bool, optional
+        Reserved for future use.
+    """
+
     def __init__(self, indices, symbol, start=1, voigt=True, reverse=True,
                  create_tensor=True):
-        """
-        PyMTensor applies crystal symmetries to dielectric, elastic, 
-        piezoelectric and other material tensors of interest.  It determines 
-        what components are zero and the relationships between the nonzero 
-        components for all crystallographic point groups.  It is capable of 
-        computing components of higher-order material tensors needed when 
-        treating nonlinear effects.
-        
-        start: integer
-            Allow for either 0- or 1-based indexing (`start=0` or `start=1`).
-        """
         self.start_index = start
         dims, repeats = SymbolicTensor._parse_name(indices)
         # Total uncompressed tensor dimension
@@ -316,7 +559,23 @@ class SparseSymbolicTensor(SymbolicTensor):
     @staticmethod
     def _unique_full_indices(ivm, voigt_indices):
         """
-        Convert a tuple of Voigt indices to an expanded tuple of full indices.
+        Convert grouped Voigt-index lists to fully expanded index tuples.
+
+        .. warning::
+            This method is incomplete (contains a reference to an undefined
+            variable ``foo``) and will raise ``NameError`` at runtime.
+
+        Parameters
+        ----------
+        ivm : dict
+            Inverse Voigt maps keyed by dimension.
+        voigt_indices : list
+            Grouped Voigt index information as returned by :meth:`_major_syms`.
+
+        Returns
+        -------
+        bar : tuple
+            Partially computed result (implementation not finished).
         """
 #         return [ivm[voigt_index] for voigt_index in voigt_indices]
         bar = tuple(chain(*foo) for foo in product(voigt_indices))
@@ -324,27 +583,68 @@ class SparseSymbolicTensor(SymbolicTensor):
 
     @staticmethod
     def _flatten_indices(indices):
-        return list(tuple(chain.from_iterable(val)) 
+        """
+        Flatten nested index product groups into a list of full index tuples.
+
+        Takes a list of index groups, where each group is a list of
+        full-index tuples for one Voigt slot, and returns the Cartesian
+        product of all groups flattened into single tuples.
+
+        Parameters
+        ----------
+        indices : list of list of tuples
+            Each outer element corresponds to one Voigt slot and contains
+            the set of full index tuples for that slot.
+
+        Returns
+        -------
+        flat : list of tuples
+            All combinations of full indices, one tuple per combination.
+
+        Examples
+        --------
+        >>> indices = [([(1, 2), (2, 1)], [(2, 2)]),
+        ...            ([(2, 2)], [(1, 2), (2, 1)])]
+        >>> SparseSymbolicTensor._flatten_indices(indices)
+        [(1, 2, 2, 2), (2, 1, 2, 2), (2, 2, 1, 2), (2, 2, 2, 1)]
+        """
+        return list(tuple(chain.from_iterable(val))
                     for product_indices in indices
                     for val in product(*product_indices))
 
     @staticmethod
     def _reduced_indices(dims, repeats):
         """
-        Find all unique index dimensions and their degeneracies.
-        
+        Collapse repeated (major-symmetric) index groups into a reduced list.
+
+        Given the dimension and repeat information for a tensor, returns a
+        condensed list where each unique index group appears once, annotated
+        with its degeneracy (the number of times it is repeated).
+
         Parameters
-        ==========
-        dims : iterable of integers
-            An iterable containing the tensor's dimensions
-        repeats : iterable of iterable of integers
-            An iterable containing the repeated indices for each unique dimension
-        
+        ----------
+        dims : list of int
+            Dimension of each index group (length = number of groups).
+        repeats : list of list of int
+            Each sub-list gives the positions of a repeated group.
+
         Returns
-        major_syms : list of lists
-            Each nested list contains the representative indices, degeneracy,
-            and remaining indices for each unique dimension.
-        =======
+        -------
+        red_indices : list of tuple
+            Each element is ``(dim, num_repeats)`` — the dimension of the
+            representative group and how many times it appears.
+
+        Examples
+        --------
+        For ``'AA'`` (4th-order elastic tensor with full major symmetry):
+
+        >>> SparseSymbolicTensor._reduced_indices([2, 2], [[0, 1]])
+        [(2, 2)]
+
+        For ``'AAa'`` (two symmetric rank-2 groups and one rank-1 group):
+
+        >>> SparseSymbolicTensor._reduced_indices([2, 2, 1], [[0, 1]])
+        [(2, 2), (1, 1)]
         """
 #         unique_dims = set(dims)
 #         print(dims, unique_dims, repeats)
@@ -361,38 +661,70 @@ class SparseSymbolicTensor(SymbolicTensor):
         for rm_ind in rm_indices[::-1]:
             red_indices.pop(rm_ind)
         return red_indices
-    
+
     @staticmethod
     def _expand2full(mapping, iter_indices):
+        """
+        Expand compressed Voigt indices to all equivalent full index tuples.
+
+        A local copy of :func:`~pymtensor.indexing_helpers.expand2full` that
+        returns a list instead of a tuple (retained for backwards
+        compatibility within the class).
+
+        Parameters
+        ----------
+        mapping : dict
+            Voigt → full index mapping (see :meth:`~SymbolicTensor.voigt_map`).
+        iter_indices : iterable of tuples
+            Each element is a tuple of compressed Voigt indices.
+
+        Returns
+        -------
+        full : list of tuples
+            All fully-expanded index tuples.
+        """
         full = []
         for indices in iter_indices:
             # print('indices={}'.format(indices))
             expanded = tuple(mapping[index] for index in indices)
             # print(tuple(product(*expanded)))
             # print('expanded={}'.format(expanded))
-            term = list(tuple(chain.from_iterable(val)) 
+            term = list(tuple(chain.from_iterable(val))
                         for val in product(*expanded))
             full += term
         return full
-    
+
 #     @staticmethod
     def _major_syms(self, dim_voigt, num_repeats):
         """
-        Find all equivalent indices, their degeneracies, and store a 
-        representative fully expanded (non-Voigt notation) set of indices.
-        Currently, we store the canonically largest representative index but
-        this may change in the future to allow optional ordering.
-        
+        Enumerate all unique Voigt index combinations and their symmetry equivalents.
+
+        For a given Voigt space of size *dim_voigt* (the number of compressed
+        indices for a rank-*dim_voigt* group) and a repetition count
+        *num_repeats*, finds every canonical ``(representative, equivalents)``
+        pair where the representative is the lexicographically smallest
+        combination and equivalents is the set of all its permutations.
+
         Parameters
-        ==========
+        ----------
         dim_voigt : int
-            Dimension of minor (Voigt) symmetry
+            The index-group dimension (e.g. ``2`` for a rank-2 Voigt space
+            with 6 entries, ``1`` for a rank-1 space with 3 entries).
         num_repeats : int
-            Number of repetitions of the current dimension
-        
+            How many times this group is repeated (its degeneracy).
+
         Returns
-        =======
-        major_syms : tuple of int tuples
+        -------
+        indices_map : list of tuple
+            Each element is ``(representative, equiv_set)`` where
+            *representative* is the canonical Voigt index tuple
+            (``combinations_with_replacement`` order) and *equiv_set* is the
+            set of all permutations of that tuple.
+
+        Notes
+        -----
+        The method currently has ``# @staticmethod`` commented out because
+        it accesses ``self.ivm``.  It is an instance method.
         """
         # Representative and remainder indices lists
         ivm = self.ivm
@@ -427,9 +759,10 @@ class SparseSymbolicTensor(SymbolicTensor):
         print('indices_map=', indices_map)
         return indices_map
 
+
 def symbolic_piezo(dim, sym, canonical=True, sort=True):
     voigt_map = {(0, 0): 0, (1, 1): 1, (2, 2): 2,
-                 (1, 2): 3, (2, 1): 3, (0, 2): 4, (2, 0): 4, 
+                 (1, 2): 3, (2, 1): 3, (0, 2): 4, (2, 0): 4,
                  (0, 1): 5, (1, 0): 5}
     tensor = empty((3,)*dim, dtype=object)
     indices = product(range(3), repeat=dim)

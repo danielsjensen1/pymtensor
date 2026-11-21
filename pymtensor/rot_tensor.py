@@ -3,15 +3,44 @@ from numpy.linalg import norm
 from itertools import chain, permutations, product
 
 
-
 # TODO: add more error checking for input arrays
 def to_tensor(voigt, order='Voigt'):
     """
-    Convert from compressed to standard tensor notation.
-    
-    1 -> 11, 2 -> 22, 3 -> 33
-    Voigt: 4 -> 23 & 32, 5 -> 13 & 31, 6 -> 12 & 21
-    VASP:  4 -> 12 & 21, 5 -> 23 & 32, 6 -> 13 & 31
+    Convert a compressed (Voigt) array to full tensor notation.
+
+    Expands a Voigt-compressed array into a fully symmetric tensor by
+    filling all permutations of each compressed index pair.
+
+    Supported shapes and their output shapes:
+
+    * ``(3, 3)`` → ``(3, 3)`` (rank-2, returned as-is)
+    * ``(3, 6)`` → ``(3, 3, 3)`` (rank-3, e.g. piezoelectric tensor)
+    * ``(6, 6)`` → ``(3, 3, 3, 3)`` (rank-4, e.g. elastic stiffness)
+    * ``(3, 6, 6)`` → ``(3, 3, 3, 3, 3)`` (rank-5)
+    * ``(6, 6, 6)`` → ``(3, 3, 3, 3, 3, 3)`` (rank-6)
+
+    Voigt index convention (1-based):
+    ``1→11, 2→22, 3→33, 4→23&32, 5→13&31, 6→12&21``
+
+    VASP index convention (1-based):
+    ``1→11, 2→22, 3→33, 4→12&21, 5→23&32, 6→13&31``
+
+    Parameters
+    ----------
+    voigt : numpy.ndarray
+        Compressed tensor array.  Shape must be one of those listed above.
+    order : {'Voigt', 'VASP'}, optional
+        Index convention for the off-diagonal pairs.  Default is ``'Voigt'``.
+
+    Returns
+    -------
+    res : numpy.ndarray
+        Full tensor with all symmetry-equivalent components filled.
+
+    Notes
+    -----
+    The function uses ``numpy.nditer`` for iteration and relies on the
+    symmetry of the output tensor to fill equivalent components.
     """
     index_map = {0: (0, 0), 1: (1, 1), 2: (2, 2)}
     if order.lower() == 'voigt':
@@ -66,23 +95,42 @@ def to_tensor(voigt, order='Voigt'):
                 res[flatindex] = it[0]
             it.iternext()
     return res
-        
+
 
 def to_voigt(tensor, order='Voigt'):
     """
-    Convert from standard tensor to compressed notation.
-    
-    1 -> 11, 2 -> 22, 3 -> 33
-    Voigt: 4 -> 23 & 32, 5 -> 13 & 31, 6 -> 12 & 21
-    VASP:  4 -> 12 & 21, 5 -> 23 & 32, 6 -> 13 & 31
+    Convert a full tensor to compressed (Voigt) notation.
+
+    Extracts one representative element per symmetry-equivalent group of
+    indices to produce a Voigt-compressed array.
+
+    Supported input shapes and their output shapes:
+
+    * ``(3, 3)`` → ``(3, 3)`` (rank-2, returned as-is)
+    * ``(3, 3, 3)`` → ``(3, 6)`` (rank-3, e.g. piezoelectric tensor)
+    * ``(3, 3, 3, 3)`` → ``(6, 6)`` (rank-4, e.g. elastic stiffness)
+    * ``(3, 3, 3, 3, 3)`` → ``(3, 6, 6)`` (rank-5)
+    * ``(3, 3, 3, 3, 3, 3)`` → ``(6, 6, 6)`` (rank-6)
+
+    Parameters
+    ----------
+    tensor : numpy.ndarray
+        Full tensor array whose shape is one of those listed above.
+    order : {'Voigt', 'VASP'}, optional
+        Index convention for the off-diagonal pairs.  Default is ``'Voigt'``.
+
+    Returns
+    -------
+    res : numpy.ndarray
+        Compressed tensor array.
     """
     index_map = {(0, 0): 0, (1, 1): 1, (2, 2): 2}
 #     (0, 1): 3, (1, 0): 3, (1, 2): 4, (2, 1): 4, (2, 0): 5, (0, 2): 5}
     if order.lower() == 'voigt':
-        index_map.update({(1, 2): 3, (2, 1): 3, (0, 2): 4, (2, 0): 4, 
+        index_map.update({(1, 2): 3, (2, 1): 3, (0, 2): 4, (2, 0): 4,
                           (0, 1): 5, (1, 0): 5})
     else:
-        index_map.update({(0, 1): 3, (1, 0): 3, (1, 2): 4, (2, 1): 4, 
+        index_map.update({(0, 1): 3, (1, 0): 3, (1, 2): 4, (2, 1): 4,
                           (2, 0): 5, (0, 2): 5})
     dims = len(tensor.shape)
     it = nditer(tensor, flags=['multi_index', 'refs_ok'])
@@ -123,6 +171,24 @@ def to_voigt(tensor, order='Voigt'):
 
 
 def rotu(theta, u):
+    """
+    Rotation matrix for a rotation by *theta* about an arbitrary axis *u*.
+
+    Uses the Rodrigues rotation formula.  The axis vector is normalised
+    internally so it does not need to be a unit vector on input.
+
+    Parameters
+    ----------
+    theta : float or sympy expression
+        Rotation angle in radians.
+    u : array-like of length 3
+        Rotation axis vector (need not be normalised).
+
+    Returns
+    -------
+    R : numpy.ndarray, shape (3, 3)
+        Rotation matrix.
+    """
     # Normalize u
     ux, uy, uz = u / norm(u)
     c = cos(theta)
@@ -134,6 +200,19 @@ def rotu(theta, u):
 
 
 def rotx(theta):
+    """
+    Rotation matrix for a rotation by *theta* about the x-axis.
+
+    Parameters
+    ----------
+    theta : float or sympy expression
+        Rotation angle in radians.
+
+    Returns
+    -------
+    R : numpy.ndarray, shape (3, 3)
+        Rotation matrix.
+    """
     c = cos(theta)
     s = sin(theta)
     return array([[1, 0,  0],
@@ -142,6 +221,19 @@ def rotx(theta):
 
 
 def roty(theta):
+    """
+    Rotation matrix for a rotation by *theta* about the y-axis.
+
+    Parameters
+    ----------
+    theta : float or sympy expression
+        Rotation angle in radians.
+
+    Returns
+    -------
+    R : numpy.ndarray, shape (3, 3)
+        Rotation matrix.
+    """
     c = cos(theta)
     s = sin(theta)
     return array([[ c, 0,  s],
@@ -150,6 +242,19 @@ def roty(theta):
 
 
 def rotz(theta):
+    """
+    Rotation matrix for a rotation by *theta* about the z-axis.
+
+    Parameters
+    ----------
+    theta : float or sympy expression
+        Rotation angle in radians.
+
+    Returns
+    -------
+    R : numpy.ndarray, shape (3, 3)
+        Rotation matrix.
+    """
     c = cos(theta)
     s = sin(theta)
     return array([[c, -s, 0],
@@ -159,7 +264,23 @@ def rotz(theta):
 
 def euler_rot(alpha, beta, gamma):
     """
-    Rotation by proper Euler angles
+    Rotation matrix from proper (ZXZ) Euler angles.
+
+    Computes ``R = Rz(gamma) @ Rx(beta) @ Rz(alpha)``.
+
+    Parameters
+    ----------
+    alpha : float
+        First rotation angle (about z-axis), in radians.
+    beta : float
+        Second rotation angle (about x-axis), in radians.
+    gamma : float
+        Third rotation angle (about z-axis), in radians.
+
+    Returns
+    -------
+    R : numpy.ndarray, shape (3, 3)
+        Combined rotation matrix.
     """
     rot = rotz(alpha)
     rot = dot(rotx(beta), rot)
@@ -171,16 +292,36 @@ def euler_rot(alpha, beta, gamma):
 # https://stackoverflow.com/questions/4962606/fast-tensor-rotation-with-numpy/42347571#42347571
 def rot_tensor(rotation, tensor):
     """
-    Apply a rotation to a tensor of arbitrary dimensions.
-    
+    Apply a rotation matrix to a tensor of arbitrary rank.
+
+    Contracts the rotation matrix against every index of *tensor* via a
+    sequence of ``tensordot`` operations, computing:
+
+    .. math::
+
+        T'_{i_1 i_2 \\ldots i_n} =
+            R_{i_1 j_1} R_{i_2 j_2} \\cdots R_{i_n j_n}\\, T_{j_1 j_2 \\ldots j_n}
+
     Parameters
     ----------
-    rotation : 3x3 array
-    tensor : 3^n array
-    
-    Example
+    rotation : numpy.ndarray, shape (3, 3)
+        Rotation (or any linear) matrix.  May contain SymPy expressions
+        when working in symbolic mode.
+    tensor : numpy.ndarray, shape (3,) * n
+        Tensor of rank *n*.  May contain SymPy expressions.
+
+    Returns
     -------
-    (rotated d_ijk) = A_il A_jm A_kn d_lmn
+    result : numpy.ndarray, shape (3,) * n
+        Rotated tensor.
+
+    Examples
+    --------
+    Rotate a rank-3 tensor ``d_ijk``:
+
+    .. math::
+
+        d'_{ijk} = A_{il} A_{jm} A_{kn}\\, d_{lmn}
     """
     dims = len(tensor.shape)
     res = tensor #  We don't need a deep copy because tensordot returns a new array

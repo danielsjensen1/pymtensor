@@ -15,6 +15,9 @@ dist/
 __pycache__/
 *.py[cod]
 
+# Sphinx documentation build output
+docs/_build/
+
 # Things specific to this project #
 ###################################
 
